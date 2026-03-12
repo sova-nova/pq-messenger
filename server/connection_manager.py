@@ -20,6 +20,7 @@ class ConnManager:
     async def send_message(self, sender_ws, data):
         recipient = data["recipient"]
         if(self.is_online(recipient)):
+            data["type"] = "message"
             await self.dict[recipient].send_text(json.dumps(data))
             status = {"type": "status", "message": "Message sent!"}
             await sender_ws.send_text(json.dumps(status))

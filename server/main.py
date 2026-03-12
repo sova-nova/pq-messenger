@@ -3,6 +3,7 @@ from server.connection_manager import ConnManager
 import json, asyncio
 
 # uvicorn server.main:app --reload --port 8000
+# ngrok http --url=unwhite-lovetta-oozy.ngrok-free.dev 8000
 
 app = FastAPI()
 cm = ConnManager()
