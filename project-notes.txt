@@ -1,0 +1,49 @@
+There is a server running that interacts with the database that is running on the server.
+The server will receive inquiries from clients that want to send a message.
+    If the recipient is online, then the message will be delivered.
+    If the recipient is offline, then the message will be stored.
+        If the recipient goes online, then the server will search for any pending deliveries with their name and deliver them.
+
+The client will have a CLI running on their end.
+There is a lookup table of public keys, and you can sort by username.
+After selecting a key to add, you can save that key locally so that you don't have to look it up again.
+    These keys will be periodically updated to make sure that you have the most recent version if it changes.
+    A feature to be added might be for a user to request access to a public key first (friend request)
+
+The communication will be secure on my home network through a Cloudflare tunnel.
+The Cloudflare tunnel will make it so that I don't have to open a port on my home router.
+
+#############Bob sends message to Alice###############
+
+Steps to Encryption:
+1. Key Encapsulation (ML-KEM)
+    a. Generate a shared secret through Alice's public key.
+    b. Generate a ciphertext with Alice's public key, which is the previously generated shared secret in encrypted form.
+
+2. Key Derivation (HKDF)
+    a. Bob runs the HKDF algorithm to convert the base shared secret into an AES Encryption key.
+        - This is because the shared_secret has mathematical biases that can be exploited.
+
+3. Symmetric Encryption (AES-GCM)
+    a. Encrypt the message to be sent with the AES Encryption key and "nonce". 
+        - The nonce is sent along with the payload to Alice (not secret).
+
+4. Digital Signature (ML-DSA)
+    a. Use the encrypted payload and Bob's signing private key to generate a unique signature.
+        - This will also be sent along with the payload and nonce.
+
+5. Send Data to server
+    a. The server will obtain the message and check the recipient, either forwarding the message or queueing it.
+    b. The server will send the (sender, recipient, ciphertext, payload, nonce, signature) at once.
+
+6. Signature Verification
+    a. Using the payload and signature and Bob's signing public key, Alice will run ML-DSA to calculate the integrity of the signature.
+
+7. Decapsulation (ML-KEM)
+    a. Decrypt the ciphertext with Alice's private key, resulting in the shared_secret
+
+8. Key Derivation (HKDF)
+    a. Using the shared_secret, generate the AES Encryption key for decryption.
+
+9. Symmetric Decryption (AES-GCM)
+    a. Use the nonce and calculated AES Encryption key to decrypt the payload.
