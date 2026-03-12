@@ -64,7 +64,15 @@ async def handle_user_input(ws, public_key, private_key, private_sig):
             break
 
 async def main():
-    ws = WS_Client()
+    server = "https://unwhite-lovetta-oozy.ngrok-free.dev"
+    if not server:
+        server = "ws://localhost:8000"
+    else:
+        # Clean up the URL
+        server = server.replace("https://", "").replace("http://", "").strip("/")
+        server = f"wss://{server}"
+
+    ws = WS_Client(server)
     store = KeyStore()
 
     # Initialize Keys
