@@ -88,6 +88,7 @@ async def send_encrypted_message(message_text):
 
         data = {
             "recipient": recipient,
+            "sender": name,
             "ciphertext": base64.b64encode(ciphertext).decode(),
             "payload": base64.b64encode(payload).decode(),
             "nonce": base64.b64encode(nonce).decode(),
@@ -95,14 +96,15 @@ async def send_encrypted_message(message_text):
         }
 
         await ws.send_message(data)
+        
         add_message(f"[You → {recipient}] {message_text}")
 
     except Exception as e:
-        add_message(f"Send error: {e}")    # ← add this
+        add_message(f"Send error: {e}")
 
 
 async def main():
-    global ws, public_key, private_key, private_sig, recipient
+    global ws, public_key, private_key, private_sig, recipient, name
 
     # Setup
     store = KeyStore()
