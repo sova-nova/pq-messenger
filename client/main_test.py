@@ -11,6 +11,7 @@ from prompt_toolkit.layout import Layout, HSplit
 from prompt_toolkit.widgets import TextArea, Frame
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.document import Document
+from datetime import datetime
 
 
 # These need to be accessible by multiple functions
@@ -64,7 +65,14 @@ async def listen_for_messages(private_key, public_sig):
                     aes_key = crypto_engine.generateAES(shared_secret)
                     message = crypto_engine.decryptPayload(payload, nonce, aes_key)
                     sender = data.get("sender", "Unknown")
-                    add_message(f"[{sender}] {message.decode()}")
+                    timestamp = data.get("timestamp", "")
+                    if(timestamp):
+                        t = datetime.fromisoformat(timestamp)
+                        time_str = t.strftime("%H:%M")
+                    else:
+                        time_str = "??:??"
+
+                    add_message(f"[{time_str}] [{sender}] {message.decode()}")
                 else:
                     add_message("Signature invalid!")
 
@@ -90,6 +98,7 @@ async def send_encrypted_message(message_text):
             "recipient": recipient,
             "sender": name,
             "ciphertext": base64.b64encode(ciphertext).decode(),
+            "timestamp": datetime.now().isoformat(),
             "payload": base64.b64encode(payload).decode(),
             "nonce": base64.b64encode(nonce).decode(),
             "signature": base64.b64encode(signature).decode()
@@ -97,7 +106,8 @@ async def send_encrypted_message(message_text):
 
         await ws.send_message(data)
         
-        add_message(f"[You → {recipient}] {message_text}")
+        time_str = datetime.now().strftime("%H:%M")
+        add_message(f"[{time_str}] [You → {recipient}] {message_text}")
 
     except Exception as e:
         add_message(f"Send error: {e}")

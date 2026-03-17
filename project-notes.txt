@@ -47,3 +47,11 @@ Steps to Encryption:
 
 9. Symmetric Decryption (AES-GCM)
     a. Use the nonce and calculated AES Encryption key to decrypt the payload.
+
+#############################
+Stuff to add
+#############################
+
+Make it so that the sender knows if their message was received or queued.
+    Or make it so that they can actively see if the user they are messaging is online.
+
