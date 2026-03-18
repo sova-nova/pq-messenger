@@ -43,7 +43,7 @@ def add_message(text):
     )
 
 
-async def listen_for_messages(private_key, public_sig):
+async def listen_for_messages(private_key):
     while True:
         try:
             response = await ws.receive_message()
@@ -59,6 +59,7 @@ async def listen_for_messages(private_key, public_sig):
                 payload = base64.b64decode(data["payload"])
                 nonce = base64.b64decode(data["nonce"])
                 signature = base64.b64decode(data["signature"])
+                public_sig = base64.b64decode(data["public_sig"])
 
                 if crypto_engine.verifySignature(payload, public_sig, signature):
                     shared_secret = crypto_engine.decapsulate(ciphertext, private_key)
@@ -101,7 +102,8 @@ async def send_encrypted_message(message_text):
             "timestamp": datetime.now().isoformat(),
             "payload": base64.b64encode(payload).decode(),
             "nonce": base64.b64encode(nonce).decode(),
-            "signature": base64.b64encode(signature).decode()
+            "signature": base64.b64encode(signature).decode(),
+            "public_sig": base64.b64encode(public_sig).decode()
         }
 
         await ws.send_message(data)
@@ -114,7 +116,7 @@ async def send_encrypted_message(message_text):
 
 
 async def main():
-    global ws, public_key, private_key, private_sig, recipient, name
+    global ws, public_key, public_sig, private_key, private_sig, recipient, name
 
     # Setup
     store = KeyStore()
@@ -190,7 +192,7 @@ async def main():
 
     # Start listener in background
     listener = asyncio.create_task(
-        listen_for_messages(private_key, public_sig)
+        listen_for_messages(private_key)
     )
 
     # Run the UI
