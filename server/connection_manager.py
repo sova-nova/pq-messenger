@@ -1,10 +1,12 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 import json
+import asyncio
 
 class ConnManager:
     def __init__(self):
         self.dict = {}
         self.message_queue = {}
+        self.key_wait = {} # Store the message that has yet to be decrypted, tied to the name of the initial sender
         self.key_storage = {}
 
     # When a user connects to the server, they are placed in the active dictionary
@@ -46,7 +48,6 @@ class ConnManager:
             public_kem = data["public_kem"]
             public_dsa = data["public_dsa"]
             self.register_keys(user, public_kem, public_dsa)
-            # print(self.get_keys(user)) # See if the keys are actually stored
         elif(data["type"] == "request_keys"):
             user = data["user"]
             key_data = self.get_keys(user)
@@ -57,19 +58,34 @@ class ConnManager:
                     "public_kem": key_data["public_kem"],
                     "public_dsa": key_data["public_dsa"]
                 }
+                # Send the keys back to the person who prompted for the keys
                 await sender_ws.send_text(json.dumps(response))
                 print(f"Keys sent for {user}")
+                # await asyncio.sleep(5)
+                # # Send waiting message if there is one now that the keys are received by the recipient
+                # # Check if there are waiting messages
+                # if user in self.key_wait and self.key_wait[user]:
+                #     for msg in self.key_wait[user]:
+                #         msg["type"] = "message"
+                #         await sender_ws.send_text(json.dumps(msg))
+                #         print(f"Delivered waiting message from {user}")
+                #     del self.key_wait[user]
             else:
                 status = {"type": "status", "message": f"No keys found for {user}"}
                 await sender_ws.send_text(json.dumps(status))
 
     async def send_message(self, sender_ws, data): # Sender_ws is for sending status back to the sender
         recipient = data["recipient"]
+        # sender = data["sender"]
         if(self.is_online(recipient)):
             data["type"] = "message"
             await self.dict[recipient].send_text(json.dumps(data))
             # status = {"type": "status", "message": "Message sent!"}
             # await sender_ws.send_text(json.dumps(status))
+        # elif(data["type"] == "wait"):
+        #     if sender not in self.key_wait:
+        #         self.key_wait[sender] = []
+        #     self.key_wait[sender].append(data)
         else:
             # Queue the message
             data["type"] = "message"

@@ -34,6 +34,7 @@ private_key = None
 private_sig = None
 recipient = None
 recipient_keys = {}
+pending_messages = []
 
 
 def add_message(text):
@@ -44,7 +45,7 @@ def add_message(text):
     )
 
 
-async def listen_for_messages(private_key, public_sig):
+async def listen_for_messages(private_key):
     while True:
         try:
             response = await ws.receive_message()
@@ -57,15 +58,22 @@ async def listen_for_messages(private_key, public_sig):
 
             elif data.get("type") == "message":
                 sender = data["sender"]
+                add_message(f"[Sender] {sender}")
                 if sender in recipient_keys:
                     sender_dsa = recipient_keys[sender]["public_dsa"]
                 else:
-                    add_message(f"No signing key for {sender}, requesting...")
+                    # # Send message to waiting_queue for when you get keys back
+                    # data["type"] = "wait"
+                    # await ws.send_message(data)
+                    pending_messages.append(data)
+                    
+                    # add_message(f"No signing key for {sender}, requesting...")
                     # Request their keys
                     request = {"type": "request_keys", "user": sender}
                     await ws.send_message(request)
                     continue
-
+                
+                add_message("Got to here")
                 ciphertext = base64.b64decode(data["ciphertext"])
                 payload = base64.b64decode(data["payload"])
                 nonce = base64.b64decode(data["nonce"])
@@ -93,6 +101,36 @@ async def listen_for_messages(private_key, public_sig):
                     "public_kem": base64.b64decode(data["public_kem"]),
                     "public_dsa": base64.b64decode(data["public_dsa"])
                 }
+                
+                # Process any pending messages from this user
+                remaining = []
+                for msg in pending_messages:
+                    if msg.get("sender") == user:
+                        # Now we have keys, process it
+                        sender_dsa = recipient_keys[user]["public_dsa"]
+                        
+                        ciphertext = base64.b64decode(msg["ciphertext"])
+                        payload = base64.b64decode(msg["payload"])
+                        nonce = base64.b64decode(msg["nonce"])
+                        signature = base64.b64decode(msg["signature"])
+                        
+                        if crypto_engine.verifySignature(payload, sender_dsa, signature):
+                            shared_secret = crypto_engine.decapsulate(ciphertext, private_key)
+                            aes_key = crypto_engine.generateAES(shared_secret)
+                            message = crypto_engine.decryptPayload(payload, nonce, aes_key)
+                            timestamp = msg.get("timestamp", "")
+                            if timestamp:
+                                t = datetime.fromisoformat(timestamp)
+                                time_str = t.strftime("%H:%M")
+                            else:
+                                time_str = "??:??"
+                            add_message(f"[{time_str}] [{user}] {message.decode()}")
+                        else:
+                            add_message("Signature invalid!")
+                    else:
+                        remaining.append(msg)
+                pending_messages.clear()
+                pending_messages.extend(remaining)
 
         except Exception as e:
             add_message(f"ERROR: {type(e).__name__}: {e}")
@@ -156,7 +194,8 @@ async def main():
     public_sig, private_sig = store.load_dsa_keypair()
 
     # Get connection info before starting UI
-    server = input("Server URL (press enter for localhost): ")
+    # server = input("Server URL (press enter for localhost): ")
+    server = "https://unwhite-lovetta-oozy.ngrok-free.dev" # Change this back to the line above for debugging on localhost
     if not server:
         server = "ws://localhost:8000"
     else:
@@ -236,7 +275,7 @@ async def main():
 
     # Start listener in background
     listener = asyncio.create_task(
-        listen_for_messages(private_key, public_sig)
+        listen_for_messages(private_key)
     )
 
     # Run the UI
