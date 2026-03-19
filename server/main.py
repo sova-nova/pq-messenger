@@ -20,7 +20,11 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
             raw_data = await websocket.receive_text()
             data = json.loads(raw_data)
             
-            await cm.send_message(websocket, data)
+            if(data["type"] == "message"):
+                await cm.send_message(websocket, data)
+
+            if(data["type"] == "register_keys" or data["type"] == "request_keys"):
+                await cm.handle_keys(websocket, data)
     
     except WebSocketDisconnect:
         await cm.disconnect(username)

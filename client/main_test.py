@@ -33,6 +33,7 @@ public_key = None
 private_key = None
 private_sig = None
 recipient = None
+recipient_keys = {}
 
 
 def add_message(text):
@@ -55,12 +56,22 @@ async def listen_for_messages(private_key, public_sig):
                 add_message(f"[Server] {data['message']}")
 
             elif data.get("type") == "message":
+                sender = data["sender"]
+                if sender in recipient_keys:
+                    sender_dsa = recipient_keys[sender]["public_dsa"]
+                else:
+                    add_message(f"No signing key for {sender}, requesting...")
+                    # Request their keys
+                    request = {"type": "request_keys", "user": sender}
+                    await ws.send_message(request)
+                    continue
+
                 ciphertext = base64.b64decode(data["ciphertext"])
                 payload = base64.b64decode(data["payload"])
                 nonce = base64.b64decode(data["nonce"])
                 signature = base64.b64decode(data["signature"])
 
-                if crypto_engine.verifySignature(payload, public_sig, signature):
+                if crypto_engine.verifySignature(payload, sender_dsa, signature):
                     shared_secret = crypto_engine.decapsulate(ciphertext, private_key)
                     aes_key = crypto_engine.generateAES(shared_secret)
                     message = crypto_engine.decryptPayload(payload, nonce, aes_key)
@@ -75,6 +86,13 @@ async def listen_for_messages(private_key, public_sig):
                     add_message(f"[{time_str}] [{sender}] {message.decode()}")
                 else:
                     add_message("Signature invalid!")
+            
+            elif data.get("type") == "request_keys":
+                user = data["user"]
+                recipient_keys[user] = {
+                    "public_kem": base64.b64decode(data["public_kem"]),
+                    "public_dsa": base64.b64decode(data["public_dsa"])
+                }
 
         except Exception as e:
             add_message(f"ERROR: {type(e).__name__}: {e}")
@@ -87,14 +105,29 @@ async def send_encrypted_message(message_text):
     if not recipient:
         add_message("Set recipient first with /to username")
         return
+    
+    # Check if we have recipient's keys
+    if recipient not in recipient_keys:
+        # add_message(f"Requesting {recipient}'s keys...")
+        request = {"type": "request_keys", "user": recipient}
+        await ws.send_message(request)
+        # Wait briefly for the key response
+        await asyncio.sleep(1)
+        
+        if recipient not in recipient_keys:
+            add_message(f"Could not get keys for {recipient}")
+            return
+
+    recipient_kem = recipient_keys[recipient]["public_kem"]
 
     try:
-        ciphertext, shared_secret = crypto_engine.encapsulate(public_key, private_key)
+        ciphertext, shared_secret = crypto_engine.encapsulate(recipient_kem, private_key)
         aes_key = crypto_engine.generateAES(shared_secret)
         payload, nonce = crypto_engine.symmetricEncryption(aes_key, message_text)
         signature = crypto_engine.createSignature(payload, private_sig)
 
         data = {
+            "type": "message",
             "recipient": recipient,
             "sender": name,
             "ciphertext": base64.b64encode(ciphertext).decode(),
@@ -135,6 +168,19 @@ async def main():
 
     ws = WS_Client(server)
     await ws.client_connect(name)
+    key_data = {
+        "type": "register_keys",
+        "user": name,
+        "public_kem": base64.b64encode(public_key).decode(),
+        "public_dsa": base64.b64encode(public_sig).decode()
+    }
+    await ws.send_message(key_data)
+
+    key_request_data = {
+        "type": "request_keys",
+        "user": recipient
+    }
+    await ws.send_message(key_request_data)
 
     add_message(f"Connected as {name}")
     add_message(f"Sending to: {recipient}")
