@@ -58,7 +58,7 @@ async def listen_for_messages(private_key):
 
             elif data.get("type") == "message":
                 sender = data["sender"]
-                add_message(f"[Sender] {sender}")
+                # add_message(f"[Sender] {sender}")
                 if sender in recipient_keys:
                     sender_dsa = recipient_keys[sender]["public_dsa"]
                 else:
@@ -73,7 +73,7 @@ async def listen_for_messages(private_key):
                     await ws.send_message(request)
                     continue
                 
-                add_message("Got to here")
+                # add_message("Got to here")
                 ciphertext = base64.b64decode(data["ciphertext"])
                 payload = base64.b64decode(data["payload"])
                 nonce = base64.b64decode(data["nonce"])
@@ -202,11 +202,46 @@ async def main():
         server = server.replace("https://", "").replace("http://", "").strip("/")
         server = f"wss://{server}"
 
-    name = input("State your name: ")
+    ws = WS_Client(server)
+
+    reg_login = input("(r)egister or (l)ogin: ")
+    username = input("Username: ")
+    password = input("Password: ")
+
+    await ws.client_connect(username)
+
+    if reg_login == "r":
+        data = {
+            "type": "register",
+            "username": username,
+            "password": password
+        }
+        await ws.send_message(data)
+        response = await ws.receive_message()
+        result = json.loads(response)
+        
+        if result.get("success") == False:
+            print("Registration failed: " + result.get("message", ""))
+            return
+
+    elif reg_login == "l":
+        data = {
+            "type": "login",
+            "username": username,
+            "password": password
+        }
+        await ws.send_message(data)
+        response = await ws.receive_message()
+        result = json.loads(response)
+        
+        if result.get("success") == False:
+            print("Login failed: " + result.get("message", ""))
+            return
+
+    # If login/registration worked   
+    name = username
     recipient = input("Default recipient: ")
 
-    ws = WS_Client(server)
-    await ws.client_connect(name)
     key_data = {
         "type": "register_keys",
         "user": name,

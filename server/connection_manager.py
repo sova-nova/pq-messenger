@@ -1,6 +1,7 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 import json
 import asyncio
+from argon2 import PasswordHasher
 
 class ConnManager:
     def __init__(self):
@@ -8,6 +9,8 @@ class ConnManager:
         self.message_queue = {}
         self.key_wait = {} # Store the message that has yet to be decrypted, tied to the name of the initial sender
         self.key_storage = {}
+        self.accounts = {} # Store the account data
+        self.ph = PasswordHasher()
 
     # When a user connects to the server, they are placed in the active dictionary
     async def connect(self, user, websocket):
@@ -25,6 +28,23 @@ class ConnManager:
     # WHen a user disconnects from the server, they are removed from the dictionary
     async def disconnect(self, user):
         self.dict.pop(user)
+
+    def register_user(self, username, password):
+        if(username in self.accounts):
+            return False
+        
+        hashed = self.ph.hash(password)
+        self.accounts[username] = hashed
+        return True
+
+    def login_user(self, username, password):
+        if(username not in self.accounts):
+            return False
+        try:
+            self.ph.verify(self.accounts[username], password)
+            return True
+        except Exception:
+            return False
 
     #Check if a user is online for receiving
     def is_online(self, user):
@@ -94,11 +114,43 @@ class ConnManager:
             self.message_queue[recipient].append(data)
 
             count = len(self.message_queue[recipient])
-            # status = {
-            #     "type": "status", 
-            #     "message": f"{recipient} is offline. Message queued ({count} pending)."
-            # }
-            # await sender_ws.send_text(json.dumps(status))
             print(f"Queued message for {recipient}")
+
+    async def handle_account(self, sender_ws, data):
+        username = data["username"]
+        password = data["password"]
+
+        if data["type"] == "register":
+            # Success is the variable that will tell if there is a successful or failed attempt
+            success = self.register_user(username, password)
+            if success:
+                response = {
+                    "type": "account_response",
+                    "success": True,
+                    "message": "Account created"
+                }
+            else:
+                response = {
+                    "type": "account_response",
+                    "success": False,
+                    "message": "Username already taken"
+                }
+            await sender_ws.send_text(json.dumps(response))
+        
+        elif data["type"] == "login":
+            success = self.login_user(username, password)
+            if success:
+                response = {
+                    "type": "account_response",
+                    "success": True,
+                    "message": "Login successful"
+                }
+            else:
+                response = {
+                    "type": "account_response",
+                    "success": False,
+                    "message": "Invalid username or password"
+                }
+            await sender_ws.send_text(json.dumps(response))
 
     

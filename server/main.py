@@ -26,6 +26,9 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
 
             if(data["type"] == "register_keys" or data["type"] == "request_keys"):
                 await cm.handle_keys(websocket, data)
+
+            if(data["type"] == "register" or data["type"] == "login"):
+                await cm.handle_account(websocket, data)
     
     except WebSocketDisconnect:
         await cm.disconnect(username)
