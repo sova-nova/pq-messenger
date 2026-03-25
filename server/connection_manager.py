@@ -10,6 +10,7 @@ class ConnManager:
         self.key_wait = {} # Store the message that has yet to be decrypted, tied to the name of the initial sender
         self.key_storage = {}
         self.accounts = {} # Store the account data
+        self.authenticated = set()
         self.ph = PasswordHasher()
 
     # When a user connects to the server, they are placed in the active dictionary
@@ -25,16 +26,22 @@ class ConnManager:
             print(f"Delivered {count} queued messages to {user}")
             del self.message_queue[user]
 
-    # WHen a user disconnects from the server, they are removed from the dictionary
+    # When a user disconnects from the server, they are removed from the dictionary and authenticated set
     async def disconnect(self, user):
-        self.dict.pop(user)
+        if user in self.dict:
+            del self.dict[user]
+        self.authenticated.discard(user)    # ← remove auth on disconnect
 
+    def is_authenticated(self, user):
+        return user in self.authenticated
+    
     def register_user(self, username, password):
         if(username in self.accounts):
             return False
         
         hashed = self.ph.hash(password)
         self.accounts[username] = hashed
+        self.authenticated.add(username)
         return True
 
     def login_user(self, username, password):
@@ -42,6 +49,7 @@ class ConnManager:
             return False
         try:
             self.ph.verify(self.accounts[username], password)
+            self.authenticated.add(username)
             return True
         except Exception:
             return False

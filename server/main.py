@@ -20,15 +20,27 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
         while True:
             raw_data = await websocket.receive_text()
             data = json.loads(raw_data)
-            
-            if(data["type"] == "message"):
-                await cm.send_message(websocket, data)
-
-            if(data["type"] == "register_keys" or data["type"] == "request_keys"):
-                await cm.handle_keys(websocket, data)
 
             if(data["type"] == "register" or data["type"] == "login"):
                 await cm.handle_account(websocket, data)
+                continue
+            
+            if not cm.is_authenticated(username):
+                status = {
+                    "type": "account_response",
+                    "success": False,
+                    "message": "You must login first"
+                }
+                await websocket.send_text(json.dumps(status))
+                continue
+
+            if(data["type"] == "message"):
+                await cm.send_message(websocket, data)
+
+            elif(data["type"] == "register_keys" or data["type"] == "request_keys"):
+                await cm.handle_keys(websocket, data)
+
+            
     
     except WebSocketDisconnect:
         await cm.disconnect(username)

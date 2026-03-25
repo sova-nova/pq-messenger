@@ -12,6 +12,7 @@ from prompt_toolkit.widgets import TextArea, Frame
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.document import Document
 from datetime import datetime
+import getpass
 
 
 # These need to be accessible by multiple functions
@@ -36,6 +37,20 @@ recipient = None
 recipient_keys = {}
 pending_messages = []
 
+def validate_password(password):
+    if len(password) < 8:
+        return False, "Password must be at least 8 characters"
+    
+    if not any(c.isupper() for c in password):
+        return False, "Password must contain an uppercase letter"
+    
+    if not any(c.islower() for c in password):
+        return False, "Password must contain a lowercase letter"
+    
+    if not any(c.isdigit() for c in password):
+        return False, "Password must contain a number"
+    
+    return True, "Password accepted"
 
 def add_message(text):
     new_text = message_area.text + text + "\n"
@@ -205,8 +220,18 @@ async def main():
     ws = WS_Client(server)
 
     reg_login = input("(r)egister or (l)ogin: ")
-    username = input("Username: ")
-    password = input("Password: ")
+    if reg_login == "r":
+        username = input("Username: ")
+        while True:
+            password = getpass.getpass("Password: ")
+            valid, message = validate_password(password)
+            if valid:
+                break
+            print(message)
+    else:        
+        username = input("Username: ")
+        # password = input("Password: ")
+        password = getpass.getpass("Password: ")
 
     await ws.client_connect(username)
 
