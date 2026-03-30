@@ -1,6 +1,7 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from server.connection_manager import ConnManager
 import json, asyncio
+import sqlite3
 
 # uvicorn server.main:app --reload --port 8000
 # ngrok http --url=unwhite-lovetta-oozy.ngrok-free.dev 8000
@@ -39,6 +40,9 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
 
             elif(data["type"] == "register_keys" or data["type"] == "request_keys"):
                 await cm.handle_keys(websocket, data)
+
+            elif data["type"] == "request_queued":
+                await cm.deliver_queued(username, websocket)
 
             
     

@@ -61,6 +61,9 @@ def add_message(text):
 
 
 async def listen_for_messages(private_key):
+    request_queued = {"type": "request_queued"}
+    await ws.send_message(request_queued)
+    
     while True:
         try:
             response = await ws.receive_message()

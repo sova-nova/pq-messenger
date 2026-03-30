@@ -1,30 +1,27 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+
+from server.database import Database
 import json
-import asyncio
 from argon2 import PasswordHasher
 
 class ConnManager:
     def __init__(self):
         self.dict = {}
-        self.message_queue = {}
-        self.key_wait = {} # Store the message that has yet to be decrypted, tied to the name of the initial sender
         self.key_storage = {}
-        self.accounts = {} # Store the account data
         self.authenticated = set()
         self.ph = PasswordHasher()
+        self.db = Database()
 
     # When a user connects to the server, they are placed in the active dictionary
     async def connect(self, user, websocket):
         self.dict[user] = websocket
 
-        # Check for queued messages
-        if user in self.message_queue:
-            for msg in self.message_queue[user]:
-                await websocket.send_text(json.dumps(msg))
-            
-            count = len(self.message_queue[user])
-            print(f"Delivered {count} queued messages to {user}")
-            del self.message_queue[user]
+        # # Deliver queued messages (from database)
+        # queued = self.db.get_queued_messages(user)
+        # if queued:
+        #     for msg_id, msg_data in queued:
+        #         await websocket.send_text(msg_data)
+        #     print(f"Delivered {len(queued)} queued messages to {user}")
+        #     self.db.delete_queued_messages(user)
 
     # When a user disconnects from the server, they are removed from the dictionary and authenticated set
     async def disconnect(self, user):
@@ -36,39 +33,45 @@ class ConnManager:
         return user in self.authenticated
     
     def register_user(self, username, password):
-        if(username in self.accounts):
-            return False
-        
         hashed = self.ph.hash(password)
-        self.accounts[username] = hashed
-        self.authenticated.add(username)
-        return True
+        success = self.db.register_user(username, hashed)
+        if success:
+            self.authenticated.add(username)
+        return success
 
     def login_user(self, username, password):
-        if(username not in self.accounts):
+        stored_hash = self.db.get_password_hash(username)
+        if not stored_hash:
             return False
         try:
-            self.ph.verify(self.accounts[username], password)
+            self.ph.verify(stored_hash, password)
             self.authenticated.add(username)
             return True
         except Exception:
             return False
 
-    #Check if a user is online for receiving
+    # Check if a user is online for receiving
     def is_online(self, user):
         return user in self.dict
     
     def register_keys(self, user, public_kem, public_dsa):
+        # Cache in memory
         self.key_storage[user] = {
-            "type": "request_keys",
             "public_kem": public_kem,
             "public_dsa": public_dsa
         }
+        # Save to database
+        self.db.store_keys(user, public_kem, public_dsa)
 
     def get_keys(self, user):
+        # Check memory cache first
         if user in self.key_storage:
             return self.key_storage[user]
-        return None
+        # Fall back to database
+        keys = self.db.get_keys(user)
+        if keys:
+            self.key_storage[user] = keys
+        return keys
 
     async def handle_keys(self, sender_ws, data):
         if(data["type"] == "register_keys"):
@@ -89,39 +92,20 @@ class ConnManager:
                 # Send the keys back to the person who prompted for the keys
                 await sender_ws.send_text(json.dumps(response))
                 print(f"Keys sent for {user}")
-                # await asyncio.sleep(5)
-                # # Send waiting message if there is one now that the keys are received by the recipient
-                # # Check if there are waiting messages
-                # if user in self.key_wait and self.key_wait[user]:
-                #     for msg in self.key_wait[user]:
-                #         msg["type"] = "message"
-                #         await sender_ws.send_text(json.dumps(msg))
-                #         print(f"Delivered waiting message from {user}")
-                #     del self.key_wait[user]
+
             else:
                 status = {"type": "status", "message": f"No keys found for {user}"}
                 await sender_ws.send_text(json.dumps(status))
 
-    async def send_message(self, sender_ws, data): # Sender_ws is for sending status back to the sender
+    async def send_message(self, sender_ws, data):
         recipient = data["recipient"]
-        # sender = data["sender"]
-        if(self.is_online(recipient)):
+        if self.is_online(recipient):
             data["type"] = "message"
             await self.dict[recipient].send_text(json.dumps(data))
-            # status = {"type": "status", "message": "Message sent!"}
-            # await sender_ws.send_text(json.dumps(status))
-        # elif(data["type"] == "wait"):
-        #     if sender not in self.key_wait:
-        #         self.key_wait[sender] = []
-        #     self.key_wait[sender].append(data)
         else:
-            # Queue the message
             data["type"] = "message"
-            if recipient not in self.message_queue:
-                self.message_queue[recipient] = []
-            self.message_queue[recipient].append(data)
-
-            count = len(self.message_queue[recipient])
+            # Save to database instead of memory
+            self.db.queue_message(recipient, json.dumps(data))
             print(f"Queued message for {recipient}")
 
     async def handle_account(self, sender_ws, data):
@@ -153,12 +137,24 @@ class ConnManager:
                     "success": True,
                     "message": "Login successful"
                 }
+                await sender_ws.send_text(json.dumps(response))
+
+                # Deliver queued messages AFTER login
+                await self.deliver_queued(username, sender_ws)
             else:
                 response = {
                     "type": "account_response",
                     "success": False,
                     "message": "Invalid username or password"
                 }
-            await sender_ws.send_text(json.dumps(response))
+                await sender_ws.send_text(json.dumps(response))
+
+    async def deliver_queued(self, user, websocket):
+        queued = self.db.get_queued_messages(user)
+        if queued:
+            for msg_id, msg_data in queued:
+                await websocket.send_text(msg_data)
+            print(f"Delivered {len(queued)} queued messages to {user}")
+            self.db.delete_queued_messages(user)
 
     
