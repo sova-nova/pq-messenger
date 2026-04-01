@@ -201,9 +201,14 @@ async def send_encrypted_message(message_text):
     except Exception as e:
         add_message(f"Send error: {e}")
 
-
-async def main():
+async def chat_app():
     global ws, public_key, private_key, private_sig, recipient, name
+
+    # Reset state
+    recipient_keys = {}
+    pending_messages = []
+    username = ""
+    password = ""
 
     # Setup
     store = KeyStore()
@@ -222,7 +227,7 @@ async def main():
 
     ws = WS_Client(server)
 
-    reg_login = input("(r)egister or (l)ogin: ")
+    reg_login = input("(r)egister, (l)ogin, or (q)uit: ")
     if reg_login == "r":
         username = input("Username: ")
         while True:
@@ -231,14 +236,7 @@ async def main():
             if valid:
                 break
             print(message)
-    else:        
-        username = input("Username: ")
-        # password = input("Password: ")
-        password = getpass.getpass("Password: ")
-
-    await ws.client_connect(username)
-
-    if reg_login == "r":
+        
         data = {
             "type": "register",
             "username": username,
@@ -251,8 +249,13 @@ async def main():
         if result.get("success") == False:
             print("Registration failed: " + result.get("message", ""))
             return
+        
+    if reg_login == "l":        
+        username = input("Username: ")
+        # password = input("Password: ")
+        password = getpass.getpass("Password: ")
+        await ws.client_connect(username)
 
-    elif reg_login == "l":
         data = {
             "type": "login",
             "username": username,
@@ -265,6 +268,9 @@ async def main():
         if result.get("success") == False:
             print("Login failed: " + result.get("message", ""))
             return
+
+    if reg_login == "q":
+        return False
 
     # If login/registration worked   
     name = username
@@ -301,6 +307,10 @@ async def main():
             return
 
         if text == "/quit":
+            event.app.exit()
+            return
+        
+        if text == "/logout":
             event.app.exit()
             return
 
@@ -346,6 +356,15 @@ async def main():
 
     # Cleanup
     listener.cancel()
+
+    return True
+
+async def main():
+    while True:
+        should_continue = await chat_app()
+        if not should_continue:
+            break
+        print("\nLogged out.\n")
 
 
 if __name__ == "__main__":
