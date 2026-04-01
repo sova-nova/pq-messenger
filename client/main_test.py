@@ -12,6 +12,7 @@ from prompt_toolkit.widgets import TextArea, Frame
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.document import Document
 from datetime import datetime
+from known_keys import KnownKeys
 import getpass
 
 
@@ -35,6 +36,8 @@ private_key = None
 private_sig = None
 recipient = None
 recipient_keys = {}
+known = KnownKeys()
+pending_key_changes = {}
 pending_messages = []
 
 def validate_password(password):
@@ -115,6 +118,37 @@ async def listen_for_messages(private_key):
             
             elif data.get("type") == "request_keys":
                 user = data["user"]
+                kem_public = base64.b64decode(data["public_kem"])
+                dsa_public = base64.b64decode(data["public_dsa"])
+                
+                # TOFU check
+                if known.is_known(user):
+                    if known.has_key_changed(user, kem_public, dsa_public):
+                        old_fp = known.get_fingerprints(user)
+                        new_kem_fp = known.compute_fingerprint(kem_public)
+                        new_dsa_fp = known.compute_fingerprint(dsa_public)
+                        add_message(f"")
+                        add_message(f"⚠⚠⚠ WARNING: {user}'s keys have CHANGED! ⚠⚠⚠")
+                        add_message(f"  Old KEM fingerprint: {old_fp['kem']}")
+                        add_message(f"  New KEM fingerprint: {new_kem_fp}")
+                        add_message(f"  Old DSA fingerprint: {old_fp['dsa']}")
+                        add_message(f"  New DSA fingerprint: {new_dsa_fp}")
+                        add_message(f"  This could mean:")
+                        add_message(f"    - {user} reinstalled the app")
+                        add_message(f"    - {user} got a new device")
+                        add_message(f"    - Someone is intercepting messages")
+                        add_message(f"  Type /accept {user} to trust new keys")
+                        add_message(f"")
+                        # Don't store the new keys yet
+                        # Don't process pending messages
+                        continue
+                else:
+                    # First time seeing this user
+                    fp = known.compute_fingerprint(kem_public)
+                    add_message(f"First contact with {user}")
+                    add_message(f"  Fingerprint: {fp}")
+                    known.store_keys(user, kem_public, dsa_public)
+                
                 recipient_keys[user] = {
                     "public_kem": base64.b64decode(data["public_kem"]),
                     "public_dsa": base64.b64decode(data["public_dsa"])
@@ -207,6 +241,8 @@ async def chat_app():
     # Reset state
     recipient_keys = {}
     pending_messages = []
+    pending_key_changes = {}
+    known = KnownKeys()
     username = ""
     password = ""
 
@@ -292,8 +328,12 @@ async def chat_app():
 
     add_message(f"Connected as {name}")
     add_message(f"Sending to: {recipient}")
-    add_message("Commands: /to <user> to change recipient, /quit to exit")
-    add_message("")
+    add_message("Commands:")
+    add_message("  /to <user> - change recipient")
+    add_message("  /fingerprint <user> - show key fingerprints")
+    add_message("  /accept <user> - accept changed keys")
+    add_message("  /logout - switch accounts")
+    add_message("  /quit - exit")
 
     # Key bindings
     kb = KeyBindings()
@@ -318,6 +358,27 @@ async def chat_app():
             global recipient
             recipient = text[4:].strip()
             add_message(f"Now sending to: {recipient}")
+            return
+        
+        if text.startswith("/accept "):
+            accepted_user = text[8:].strip()
+            if accepted_user in recipient_keys:
+                # They already have keys in memory from the server
+                # but we haven't stored them yet
+                add_message(f"Trusting new keys for {accepted_user}")
+            else:
+                add_message(f"No pending key change for {accepted_user}")
+            return
+        
+        if text.startswith("/fingerprint "):
+            fp_user = text[13:].strip()
+            if known.is_known(fp_user):
+                fps = known.get_fingerprints(fp_user)
+                add_message(f"{fp_user}'s fingerprints:")
+                add_message(f"  KEM: {fps['kem']}")
+                add_message(f"  DSA: {fps['dsa']}")
+            else:
+                add_message(f"No stored keys for {fp_user}")
             return
 
         asyncio.get_event_loop().create_task(
