@@ -20,8 +20,10 @@ async def main(page: ft.Page):
     # Global state
     ws = None
     conversations = {}  # username → list of message controls
+    unread_counts = {}
     current_user = None
     current_recipient = None
+    contact_buttons = {}
     public_key = None
     private_key = None
     public_sig = None
@@ -80,13 +82,19 @@ async def main(page: ft.Page):
                             color=ft.Colors.BLUE_200,
                         )
 
+                        ensure_contact_exists(sender)
+
                         # Store in conversation
                         add_message_to_conversation(sender, msg_control)
 
-                        # Only add to visible chat if we're viewing this conversation
-                        if sender == current_recipient:
+                        # If not currently viewing this conversation, increment unread
+                        if sender != current_recipient:
+                            increment_unread(sender)
+                            update_contact_display(sender)
+                        else:
                             chat_messages.controls.append(msg_control)
-                            page.update()
+                        
+                        page.update()
 
                 elif data.get("type") == "request_keys":
                     user = data["user"]
@@ -110,10 +118,56 @@ async def main(page: ft.Page):
                     remaining = []
                     for msg in pending_messages:
                         if msg.get("sender") == user:
-                            # Decrypt and display (simplified)
-                            pass
+                            sender = msg.get("sender")
+                            # Now we have their keys, decrypt this message
+                            sender_dsa = recipient_keys[user]["public_dsa"]
+                            
+                            try:
+                                ciphertext = base64.b64decode(msg["ciphertext"])
+                                payload = base64.b64decode(msg["payload"])
+                                nonce = base64.b64decode(msg["nonce"])
+                                signature = base64.b64decode(msg["signature"])
+                                
+                                if crypto_engine.verifySignature(payload, sender_dsa, signature):
+                                    shared_secret = crypto_engine.decapsulate(ciphertext, private_key)
+                                    aes_key = crypto_engine.generateAES(shared_secret)
+                                    message = crypto_engine.decryptPayload(payload, nonce, aes_key)
+                                    
+                                    timestamp = msg.get("timestamp", "")
+                                    if timestamp:
+                                        t = datetime.fromisoformat(timestamp)
+                                        time_str = t.strftime("%H:%M")
+                                    else:
+                                        time_str = "??:??"
+                                    
+                                    # Create message control
+                                    msg_control = ft.Text(
+                                        f"[{time_str}] {user}: {message.decode()}",
+                                        color=ft.Colors.BLUE_200,
+                                    )
+                                    
+                                    ensure_contact_exists(sender)
+                                    
+                                    # Store in conversation
+                                    add_message_to_conversation(sender, msg_control)
+                                    
+                                    # Update unread if not viewing
+                                    if user != current_recipient:
+                                        increment_unread(user)
+                                        update_contact_display(user)
+                                    else:
+                                        chat_messages.controls.append(msg_control)
+                                        page.update()
+                            
+                            except Exception as e:
+                                print(f"Error decrypting pending message: {e}")
                         else:
+                            # Not from this user, keep in pending
                             remaining.append(msg)
+
+                    pending_messages.clear()
+                    pending_messages.extend(remaining)
+
                     pending_messages.clear()
                     pending_messages.extend(remaining)
 
@@ -268,20 +322,55 @@ async def main(page: ft.Page):
         current_recipient = username
         chat_header.value = f"Chat with {username}"
         
+        # Clear unread count
+        clear_unread(username)
+        update_contact_display(username)
+        
+        # Load messages
         chat_messages.controls.clear()
         if username in conversations:
             chat_messages.controls.extend(conversations[username])
-
+    
         page.update()
 
-    # Add some test contacts (later this will be from server)
+    # Better approach: dynamically add contacts
+    # when you receive a message from them
+
+    def ensure_contact_exists(username):
+        """Add contact if they don't exist in the list."""
+        if username == current_user:
+            return  # Don't add ourselves
+        
+        if username not in contact_buttons:
+            add_contact(username)
+            page.update()
+
     def add_contact(username):
-        contact_list.controls.append(
-            ft.TextButton(
+            """Add a contact to the list."""
+            def on_contact_click(e):
+                select_contact(username)
+            
+            button = ft.TextButton(
                 username,
-                on_click=lambda e: select_contact(username)
+                on_click=on_contact_click,
             )
-        )
+            contact_buttons[username] = button
+            contact_list.controls.append(button)
+
+    def update_contact_display(username):
+        """Update contact button to show unread count."""
+        if username in contact_buttons:
+            count = unread_counts.get(username, 0)
+            if count > 0:
+                contact_buttons[username].text = f"{username} ({count})"
+                contact_buttons[username].style = ft.ButtonStyle(
+                    color=ft.Colors.WHITE,
+                    bgcolor=ft.Colors.BLUE_700,
+                )
+            else:
+                contact_buttons[username].text = username
+                contact_buttons[username].style = None
+            page.update()
 
     def get_conversation(username):
         if username not in conversations:
@@ -292,6 +381,16 @@ async def main(page: ft.Page):
         if username not in conversations:
             conversations[username] = []
         conversations[username].append(message_control)
+
+    def increment_unread(username):
+        if username not in unread_counts:
+            unread_counts[username] = 0
+        unread_counts[username] += 1
+
+    def clear_unread(username):
+        unread_counts[username] = 0
+
+    
 
     chat_header = ft.Text("Select a contact", weight=ft.FontWeight.BOLD)
 
@@ -338,9 +437,14 @@ async def main(page: ft.Page):
 
     def show_chat():
         chat_header.value = f"Logged in as {current_user}"
-        # Add test contacts
-        add_contact("alice")
-        add_contact("bob")
+        
+        # Add test contacts (but NOT yourself)
+        # For now, hardcode some test users
+        test_contacts = ["alice", "bob", "charlie"]
+        for contact in test_contacts:
+            if contact != current_user:  # ← Don't add yourself
+                add_contact(contact)
+        
         page.controls.clear()
         page.add(chat_view)
         page.update()
