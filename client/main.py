@@ -195,7 +195,7 @@ async def main():
 
     # Get connection info before starting UI
     # server = input("Server URL (press enter for localhost): ")
-    server = "https://unwhite-lovetta-oozy.ngrok-free.dev" # Change this back to the line above for debugging on localhost
+    server = "ws://localhost:8000" # "https://unwhite-lovetta-oozy.ngrok-free.dev" Change this back to the line above for debugging on localhost
     if not server:
         server = "ws://localhost:8000"
     else:
