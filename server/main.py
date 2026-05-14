@@ -3,7 +3,7 @@ from server.connection_manager import ConnManager
 import json, asyncio
 import sqlite3
 
-# uvicorn server.main:app --reload --port 8000
+# python -m uvicorn server.main:app --host 0.0.0.0 --port 8000
 # ngrok http --url=unwhite-lovetta-oozy.ngrok-free.dev 8000
 # https://unwhite-lovetta-oozy.ngrok-free.dev
 
