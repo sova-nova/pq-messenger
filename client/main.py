@@ -199,8 +199,9 @@ async def main():
     if not server:
         server = "ws://localhost:8000"
     else:
-        server = server.replace("https://", "").replace("http://", "").strip("/")
-        server = f"wss://{server}"
+        # server = server.replace("https://", "").replace("http://", "").strip("/")
+        # server = f"wss://{server}"
+        server = f"ws://{server}"
 
     name = input("State your name: ")
     recipient = input("Default recipient: ")
