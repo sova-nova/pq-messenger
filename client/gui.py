@@ -210,8 +210,6 @@ async def main(page: ft.Page):
 
         await ws.send_message(data)
 
-    # Add near the top of main(), before the networking section
-
     def validate_password(password):
         if len(password) < 8:
             return False, "Password must be at least 8 characters"
