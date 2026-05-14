@@ -77,10 +77,11 @@ async def main(page: ft.Page):
                             time_str = "??:??"
 
                         # Add to GUI
-                        msg_control = ft.Text(
-                            f"[{time_str}] {sender}: {message.decode()}",
-                            color=ft.Colors.BLUE_200,
-                        )
+                        # msg_control = ft.Text(
+                        #     f"[{time_str}] {sender}: {message.decode()}",
+                        #     color=ft.Colors.BLUE_200,
+                        # )
+                        msg_control = create_received_bubble(sender, message.decode(), time_str)
 
                         ensure_contact_exists(sender)
 
@@ -141,10 +142,11 @@ async def main(page: ft.Page):
                                         time_str = "??:??"
                                     
                                     # Create message control
-                                    msg_control = ft.Text(
-                                        f"[{time_str}] {user}: {message.decode()}",
-                                        color=ft.Colors.BLUE_200,
-                                    )
+                                    # msg_control = ft.Text(
+                                    #     f"[{time_str}] {user}: {message.decode()}",
+                                    #     color=ft.Colors.BLUE_200,
+                                    # )
+                                    msg_control = create_received_bubble(user, message.decode(), time_str)
                                     
                                     ensure_contact_exists(sender)
                                     
@@ -299,7 +301,7 @@ async def main(page: ft.Page):
         page.update()
 
         # Connect to server (use your actual server URL)
-        server = "ws://YOUR_VM_IP:8000"
+        server = "ws://10.0.0.6:8000"
         ws = WS_Client(server)
         await ws.client_connect(username_field.value)
 
@@ -370,15 +372,13 @@ async def main(page: ft.Page):
     async def send_message_click(e):
         if message_input.value and current_recipient:
             time_str = datetime.now().strftime("%H:%M")
-            msg_control = ft.Text(f"[{time_str}] You: {message_input.value}")
-        
-            # Add to conversation storage
-            add_message_to_conversation(current_recipient, msg_control)
             
-            # Add to GUI if we're viewing this conversation
+            # Use bubble instead of plain text
+            msg_control = create_sent_bubble(message_input.value, time_str)
+            
+            add_message_to_conversation(current_recipient, msg_control)
             chat_messages.controls.append(msg_control)
             
-            # Send encrypted
             await send_encrypted_message(message_input.value)
             
             message_input.value = ""
@@ -456,6 +456,32 @@ async def main(page: ft.Page):
 
     def clear_unread(username):
         unread_counts[username] = 0
+
+    def create_sent_bubble(text, time_str):
+        bubble = ft.Container(
+            content=ft.Column([
+                ft.Text("You", size=10, color=ft.Colors.GREY_300, weight=ft.FontWeight.BOLD),
+                ft.Text(text, size=14, color=ft.Colors.WHITE),
+                ft.Text(time_str, size=9, color=ft.Colors.GREY_400, text_align=ft.TextAlign.RIGHT),
+            ]),
+            bgcolor=ft.Colors.BLUE_700,
+            border_radius=ft.border_radius.all(10),
+            padding=10,
+        )
+        return ft.Row([bubble], alignment=ft.MainAxisAlignment.END)
+
+    def create_received_bubble(sender, text, time_str):
+        bubble = ft.Container(
+            content=ft.Column([
+                ft.Text(sender, size=10, color=ft.Colors.GREY_300, weight=ft.FontWeight.BOLD),
+                ft.Text(text, size=14, color=ft.Colors.WHITE),
+                ft.Text(time_str, size=9, color=ft.Colors.GREY_400),
+            ]),
+            bgcolor=ft.Colors.BLUE_GREY_800,
+            border_radius=ft.border_radius.all(10),
+            padding=10,
+        )
+        return ft.Row([bubble], alignment=ft.MainAxisAlignment.START)
 
     
 
