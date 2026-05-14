@@ -208,6 +208,19 @@ async def main(page: ft.Page):
 
         await ws.send_message(data)
 
+    # Add near the top of main(), before the networking section
+
+    def validate_password(password):
+        if len(password) < 8:
+            return False, "Password must be at least 8 characters"
+        if not any(c.isupper() for c in password):
+            return False, "Password must contain an uppercase letter"
+        if not any(c.islower() for c in password):
+            return False, "Password must contain a lowercase letter"
+        if not any(c.isdigit() for c in password):
+            return False, "Password must contain a number"
+        return True, "Password accepted"
+
     # ══════════════════════════════════════
     # LOGIN VIEW
     # ══════════════════════════════════════
@@ -268,8 +281,62 @@ async def main(page: ft.Page):
         show_chat()
 
     async def do_register(e):
-        # Similar to do_login but with register type
-        pass
+        nonlocal ws, current_user
+        
+        if not username_field.value or not password_field.value:
+            login_message.value = "Enter username and password"
+            page.update()
+            return
+
+        # Validate password strength
+        valid, msg = validate_password(password_field.value)
+        if not valid:
+            login_message.value = msg
+            page.update()
+            return
+
+        login_message.value = "Connecting..."
+        page.update()
+
+        # Connect to server (use your actual server URL)
+        server = "ws://YOUR_VM_IP:8000"
+        ws = WS_Client(server)
+        await ws.client_connect(username_field.value)
+
+        # Register
+        data = {
+            "type": "register",
+            "username": username_field.value,
+            "password": password_field.value
+        }
+        await ws.send_message(data)
+        response = await ws.receive_message()
+        result = json.loads(response)
+
+        if result.get("success") == False:
+            login_message.value = result.get("message", "Registration failed")
+            page.update()
+            return
+
+        current_user = username_field.value
+
+        # Register keys
+        key_data = {
+            "type": "register_keys",
+            "user": current_user,
+            "public_kem": base64.b64encode(public_key).decode(),
+            "public_dsa": base64.b64encode(public_sig).decode()
+        }
+        await ws.send_message(key_data)
+
+        # Request queued messages
+        await ws.send_message({"type": "request_queued"})
+
+        # Start background listener
+        page.run_task(listen_for_messages)
+
+        # Show chat
+        show_chat()
 
     login_view = ft.Column(
         [
