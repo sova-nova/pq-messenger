@@ -228,7 +228,7 @@ async def main(page: ft.Page):
         page.update()
 
         # Connect to server
-        server = "wss://127.0.0.1:8000"  # or localhost
+        server = "ws://127.0.0.1:8000"  # or localhost
         ws = WS_Client(server)
         await ws.client_connect(username_field.value)
 
