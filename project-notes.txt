@@ -55,3 +55,6 @@ Stuff to add
 Make it so that the sender knows if their message was received or queued.
     Or make it so that they can actively see if the user they are messaging is online.
 
+# python -m uvicorn server.main:app --host 0.0.0.0 --port 8000
+# ngrok http --url=unwhite-lovetta-oozy.ngrok-free.dev 8000
+# https://unwhite-lovetta-oozy.ngrok-free.dev
