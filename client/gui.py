@@ -70,6 +70,14 @@ async def main(page: ft.Page):
                         ensure_contact_exists(sender)
                         session.add_message(sender, msg_control)
 
+                        # Save to history
+                        session.save_text_message(
+                            sender,
+                            message.decode(),
+                            is_sent=False,
+                            timestamp=data.get("timestamp")
+                        )
+
                         if sender != session.current_recipient:
                             session.increment_unread(sender)
                             update_contact_display(sender)
@@ -238,6 +246,7 @@ async def main(page: ft.Page):
 
         session.username = username_field.value
         session.is_authenticated = True
+        session.load_contacts()  # ← Load contacts AFTER username is set
 
         key_data = {
             "type": "register_keys",
@@ -286,6 +295,7 @@ async def main(page: ft.Page):
 
         session.username = username_field.value
         session.is_authenticated = True
+        session.load_contacts()  # ← Load contacts AFTER username is set
 
         key_data = {
             "type": "register_keys",
@@ -331,10 +341,19 @@ async def main(page: ft.Page):
     async def send_message_click(e):
         if message_input.value and session.current_recipient:
             time_str = datetime.now().strftime("%H:%M")
+            timestamp = datetime.now().isoformat()
             msg_control = create_sent_bubble(message_input.value, time_str)
             
             session.add_message(session.current_recipient, msg_control)
             chat_messages.controls.append(msg_control)
+            
+            # Save to history
+            session.save_text_message(
+                session.current_recipient, 
+                message_input.value, 
+                is_sent=True,
+                timestamp=timestamp
+            )
             
             await send_encrypted_message(message_input.value)
             
@@ -349,7 +368,26 @@ async def main(page: ft.Page):
         update_contact_display(username)
         
         chat_messages.controls.clear()
-        chat_messages.controls.extend(session.get_conversation(username))
+        
+        # Load from in-memory conversation first
+        if username in session.conversations:
+            chat_messages.controls.extend(session.conversations[username])
+        else:
+            # Load from persistent history
+            history = session.load_message_history(username)
+            session.conversations[username] = []
+            
+            for msg in history:
+                if msg["type"] == "text":
+                    time_str = datetime.fromisoformat(msg["timestamp"]).strftime("%H:%M")
+                    if msg["is_sent"]:
+                        bubble = create_sent_bubble(msg["text"], time_str)
+                    else:
+                        bubble = create_received_bubble(msg["sender"], msg["text"], time_str)
+                    
+                    session.conversations[username].append(bubble)
+                    chat_messages.controls.append(bubble)
+        
         page.update()
 
     def ensure_contact_exists(username):
@@ -379,7 +417,7 @@ async def main(page: ft.Page):
         if username in session.contact_buttons:
             count = session.get_unread(username)
             if count > 0:
-                session.contact_buttons[username].text = f"{username} ({count})"
+                session.contact_buttons[username].content = f"{username} ({count})"
                 session.contact_buttons[username].style = ft.ButtonStyle(
                     color=ft.Colors.WHITE,
                     bgcolor=ft.Colors.BLUE_700,

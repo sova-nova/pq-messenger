@@ -1,10 +1,12 @@
 # client/session.py
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Dict, List, Optional
 import flet as ft
 from pathlib import Path
 import json
+from message_history import MessageHistory
 
 @dataclass
 class Session:
@@ -29,36 +31,82 @@ class Session:
     unread_counts: Dict[str, int] = field(default_factory=dict)
     recipient_keys: Dict[str, dict] = field(default_factory=dict)
     pending_messages: List[dict] = field(default_factory=list)
+    message_history: Optional[MessageHistory] = None
+    
     
     # UI State
     current_recipient: Optional[str] = None
     contact_buttons: Dict[str, ft.TextButton] = field(default_factory=dict)
     
     def __post_init__(self):
-        self.contacts_path = Path.home() / ".pq-messenger" / "contacts.json"
-        self.contacts_path.parent.mkdir(parents=True, exist_ok=True)
-        self.load_contacts()
+        self.contacts_dir = Path.home() / ".pq-messenger" / "user_data"
+        self.contacts_dir.mkdir(parents=True, exist_ok=True)
+        # Don't load contacts yet - we don't know the username
+    
+    def _get_contacts_path(self) -> Path:
+        """Get the contacts file path for the current user."""
+        if not self.username:
+            raise ValueError("Username not set")
+        return self.contacts_dir / f"{self.username}_contacts.json"
+    
+    def load_message_history(self, contact: str) -> List[dict]:
+        """Load message history for a contact."""
+        if not self.message_history:
+            return []
+        return self.message_history.load_conversation(contact)
     
     def load_contacts(self):
-        """Load saved contacts from disk."""
-        if self.contacts_path.exists():
+        """Load saved contacts from disk for the current user."""
+        if not self.username:
+            print("Cannot load contacts: username not set")
+            return
+        
+        # Initialize message history
+        self.message_history = MessageHistory(self.username)
+        
+        contacts_path = self._get_contacts_path()
+        if contacts_path.exists():
             try:
-                with open(self.contacts_path, 'r') as f:
+                with open(contacts_path, 'r') as f:
                     data = json.load(f)
                     self.contacts = data.get('contacts', [])
-                    print(f"Loaded {len(self.contacts)} contacts")
+                    print(f"Loaded {len(self.contacts)} contacts for {self.username}")
             except Exception as e:
                 print(f"Error loading contacts: {e}")
                 self.contacts = []
+        else:
+            print(f"No saved contacts found for {self.username}")
+            self.contacts = []
     
     def save_contacts(self):
-        """Save contacts to disk."""
+        """Save contacts to disk for the current user."""
+        if not self.username:
+            print("Cannot save contacts: username not set")
+            return
+        
         try:
-            with open(self.contacts_path, 'w') as f:
+            contacts_path = self._get_contacts_path()
+            with open(contacts_path, 'w') as f:
                 json.dump({'contacts': self.contacts}, f, indent=2)
-            print(f"Saved {len(self.contacts)} contacts")
+            print(f"Saved {len(self.contacts)} contacts for {self.username}")
         except Exception as e:
             print(f"Error saving contacts: {e}")
+
+    def save_text_message(self, contact: str, text: str, is_sent: bool, timestamp: str = None):
+        """Save a text message to history."""
+        if not self.message_history:
+            return
+        
+        message_data = {
+            "type": "text",
+            "text": text,
+            "sender": self.username if is_sent else contact,
+            "recipient": contact if is_sent else self.username,
+            "timestamp": timestamp or datetime.now().isoformat(),
+            "is_sent": is_sent
+        }
+        
+        self.message_history.save_message(contact, message_data)
     
     def add_contact(self, username: str) -> bool:
         """Add a contact if not already present."""
@@ -97,3 +145,14 @@ class Session:
     def get_unread(self, username: str) -> int:
         """Get unread count for a contact."""
         return self.unread_counts.get(username, 0)
+    
+    def clear_session(self):
+        """Clear all session data (for logout)."""
+        self.contacts = []
+        self.conversations = {}
+        self.unread_counts = {}
+        self.recipient_keys = {}
+        self.pending_messages = []
+        self.current_recipient = None
+        self.contact_buttons = {}
+        self.is_authenticated = False
