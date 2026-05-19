@@ -423,7 +423,7 @@ async def main(page: ft.Page):
                     bgcolor=ft.Colors.BLUE_700,
                 )
             else:
-                session.contact_buttons[username].text = username
+                session.contact_buttons[username].content = username
                 session.contact_buttons[username].style = None
             page.update()
 
