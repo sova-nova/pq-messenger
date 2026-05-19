@@ -1,3 +1,4 @@
+# client/ws_client.py
 import websockets
 import json
 

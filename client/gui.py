@@ -11,32 +11,22 @@ from ws_client import WS_Client
 import crypto_engine
 from key_storage import KeyStore
 from known_keys import KnownKeys
+from session import Session  # ← New import
 
 async def main(page: ft.Page):
     page.title = "PQ-Messenger"
     page.window.width = 800
     page.window.height = 600
 
-    # Global state
-    ws = None
-    conversations = {}  # username → list of message controls
-    unread_counts = {}
-    current_user = None
-    current_recipient = None
-    contact_buttons = {}
-    public_key = None
-    private_key = None
-    public_sig = None
-    private_sig = None
-    recipient_keys = {}
-    pending_messages = []
+    # Single session object instead of many globals
+    session = Session()
     known = KnownKeys()
 
     # Initialize keys
     store = KeyStore()
     store.initialize_keys()
-    public_key, private_key = store.load_kem_keypair()
-    public_sig, private_sig = store.load_dsa_keypair()
+    session.public_key, session.private_key = store.load_kem_keypair()
+    session.public_sig, session.private_sig = store.load_dsa_keypair()
 
     # ══════════════════════════════════════
     # NETWORKING
@@ -45,18 +35,18 @@ async def main(page: ft.Page):
     async def listen_for_messages():
         while True:
             try:
-                response = await ws.receive_message()
+                response = await session.ws.receive_message()
                 data = json.loads(response)
 
                 if data.get("type") == "message":
                     sender = data["sender"]
                     
-                    if sender in recipient_keys:
-                        sender_dsa = recipient_keys[sender]["public_dsa"]
+                    if sender in session.recipient_keys:
+                        sender_dsa = session.recipient_keys[sender]["public_dsa"]
                     else:
-                        pending_messages.append(data)
+                        session.pending_messages.append(data)
                         request = {"type": "request_keys", "user": sender}
-                        await ws.send_message(request)
+                        await session.ws.send_message(request)
                         continue
 
                     ciphertext = base64.b64decode(data["ciphertext"])
@@ -65,7 +55,7 @@ async def main(page: ft.Page):
                     signature = base64.b64decode(data["signature"])
 
                     if crypto_engine.verifySignature(payload, sender_dsa, signature):
-                        shared_secret = crypto_engine.decapsulate(ciphertext, private_key)
+                        shared_secret = crypto_engine.decapsulate(ciphertext, session.private_key)
                         aes_key = crypto_engine.generateAES(shared_secret)
                         message = crypto_engine.decryptPayload(payload, nonce, aes_key)
                         timestamp = data.get("timestamp", "")
@@ -76,21 +66,12 @@ async def main(page: ft.Page):
                         else:
                             time_str = "??:??"
 
-                        # Add to GUI
-                        # msg_control = ft.Text(
-                        #     f"[{time_str}] {sender}: {message.decode()}",
-                        #     color=ft.Colors.BLUE_200,
-                        # )
                         msg_control = create_received_bubble(sender, message.decode(), time_str)
-
                         ensure_contact_exists(sender)
+                        session.add_message(sender, msg_control)
 
-                        # Store in conversation
-                        add_message_to_conversation(sender, msg_control)
-
-                        # If not currently viewing this conversation, increment unread
-                        if sender != current_recipient:
-                            increment_unread(sender)
+                        if sender != session.current_recipient:
+                            session.increment_unread(sender)
                             update_contact_display(sender)
                         else:
                             chat_messages.controls.append(msg_control)
@@ -103,8 +84,7 @@ async def main(page: ft.Page):
                     if data["found"] == True:
                         add_contact_input.hint_text = "Found!"
                         ensure_contact_exists(username)
-                        # Automatically request their keys so we can chat
-                        await ws.send_message({
+                        await session.ws.send_message({
                             "type": "request_keys",
                             "user": username
                         })
@@ -120,23 +100,21 @@ async def main(page: ft.Page):
                     # TOFU check
                     if known.is_known(user):
                         if known.has_key_changed(user, kem_public, dsa_public):
-                            # For now, just accept (later add confirmation dialog)
-                            pass
+                            pass  # TODO: Add confirmation dialog
                     else:
                         known.store_keys(user, kem_public, dsa_public)
 
-                    recipient_keys[user] = {
+                    session.recipient_keys[user] = {
                         "public_kem": kem_public,
                         "public_dsa": dsa_public
                     }
 
                     # Process pending messages
                     remaining = []
-                    for msg in pending_messages:
+                    for msg in session.pending_messages:
                         if msg.get("sender") == user:
                             sender = msg.get("sender")
-                            # Now we have their keys, decrypt this message
-                            sender_dsa = recipient_keys[user]["public_dsa"]
+                            sender_dsa = session.recipient_keys[user]["public_dsa"]
                             
                             try:
                                 ciphertext = base64.b64decode(msg["ciphertext"])
@@ -145,7 +123,7 @@ async def main(page: ft.Page):
                                 signature = base64.b64decode(msg["signature"])
                                 
                                 if crypto_engine.verifySignature(payload, sender_dsa, signature):
-                                    shared_secret = crypto_engine.decapsulate(ciphertext, private_key)
+                                    shared_secret = crypto_engine.decapsulate(ciphertext, session.private_key)
                                     aes_key = crypto_engine.generateAES(shared_secret)
                                     message = crypto_engine.decryptPayload(payload, nonce, aes_key)
                                     
@@ -156,21 +134,12 @@ async def main(page: ft.Page):
                                     else:
                                         time_str = "??:??"
                                     
-                                    # Create message control
-                                    # msg_control = ft.Text(
-                                    #     f"[{time_str}] {user}: {message.decode()}",
-                                    #     color=ft.Colors.BLUE_200,
-                                    # )
                                     msg_control = create_received_bubble(user, message.decode(), time_str)
-                                    
                                     ensure_contact_exists(sender)
+                                    session.add_message(sender, msg_control)
                                     
-                                    # Store in conversation
-                                    add_message_to_conversation(sender, msg_control)
-                                    
-                                    # Update unread if not viewing
-                                    if user != current_recipient:
-                                        increment_unread(user)
+                                    if user != session.current_recipient:
+                                        session.increment_unread(user)
                                         update_contact_display(user)
                                     else:
                                         chat_messages.controls.append(msg_control)
@@ -179,14 +148,10 @@ async def main(page: ft.Page):
                             except Exception as e:
                                 print(f"Error decrypting pending message: {e}")
                         else:
-                            # Not from this user, keep in pending
                             remaining.append(msg)
 
-                    pending_messages.clear()
-                    pending_messages.extend(remaining)
-
-                    pending_messages.clear()
-                    pending_messages.extend(remaining)
+                    session.pending_messages.clear()
+                    session.pending_messages.extend(remaining)
 
             except Exception as e:
                 print(f"Error in listener: {e}")
@@ -194,28 +159,28 @@ async def main(page: ft.Page):
 
     async def send_encrypted_message(message_text):
         """Encrypt and send a message."""
-        if not current_recipient:
+        if not session.current_recipient:
             return
 
-        if current_recipient not in recipient_keys:
-            request = {"type": "request_keys", "user": current_recipient}
-            await ws.send_message(request)
+        if session.current_recipient not in session.recipient_keys:
+            request = {"type": "request_keys", "user": session.current_recipient}
+            await session.ws.send_message(request)
             await asyncio.sleep(1)
 
-        if current_recipient not in recipient_keys:
+        if session.current_recipient not in session.recipient_keys:
             return
 
-        recipient_kem = recipient_keys[current_recipient]["public_kem"]
+        recipient_kem = session.recipient_keys[session.current_recipient]["public_kem"]
 
-        ciphertext, shared_secret = crypto_engine.encapsulate(recipient_kem, private_key)
+        ciphertext, shared_secret = crypto_engine.encapsulate(recipient_kem, session.private_key)
         aes_key = crypto_engine.generateAES(shared_secret)
         payload, nonce = crypto_engine.symmetricEncryption(aes_key, message_text)
-        signature = crypto_engine.createSignature(payload, private_sig)
+        signature = crypto_engine.createSignature(payload, session.private_sig)
 
         data = {
             "type": "message",
-            "recipient": current_recipient,
-            "sender": current_user,
+            "recipient": session.current_recipient,
+            "sender": session.username,
             "ciphertext": base64.b64encode(ciphertext).decode(),
             "timestamp": datetime.now().isoformat(),
             "payload": base64.b64encode(payload).decode(),
@@ -223,7 +188,7 @@ async def main(page: ft.Page):
             "signature": base64.b64encode(signature).decode()
         }
 
-        await ws.send_message(data)
+        await session.ws.send_message(data)
 
     def validate_password(password):
         if len(password) < 8:
@@ -245,8 +210,6 @@ async def main(page: ft.Page):
     login_message = ft.Text("", color=ft.Colors.RED)
 
     async def do_login(e):
-        nonlocal ws, current_user
-        
         if not username_field.value or not password_field.value:
             login_message.value = "Enter username and password"
             page.update()
@@ -255,19 +218,17 @@ async def main(page: ft.Page):
         login_message.value = "Connecting..."
         page.update()
 
-        # Connect to server
-        server = "ws://127.0.0.1:8000" # "ws://10.0.0.6:8000"  # or localhost
-        ws = WS_Client(server)
-        await ws.client_connect(username_field.value)
+        server = "ws://127.0.0.1:8000"
+        session.ws = WS_Client(server)
+        await session.ws.client_connect(username_field.value)
 
-        # Login
         data = {
             "type": "login",
             "username": username_field.value,
             "password": password_field.value
         }
-        await ws.send_message(data)
-        response = await ws.receive_message()
+        await session.ws.send_message(data)
+        response = await session.ws.receive_message()
         result = json.loads(response)
 
         if result.get("success") == False:
@@ -275,35 +236,27 @@ async def main(page: ft.Page):
             page.update()
             return
 
-        current_user = username_field.value
+        session.username = username_field.value
+        session.is_authenticated = True
 
-        # Register keys
         key_data = {
             "type": "register_keys",
-            "user": current_user,
-            "public_kem": base64.b64encode(public_key).decode(),
-            "public_dsa": base64.b64encode(public_sig).decode()
+            "user": session.username,
+            "public_kem": base64.b64encode(session.public_key).decode(),
+            "public_dsa": base64.b64encode(session.public_sig).decode()
         }
-        await ws.send_message(key_data)
+        await session.ws.send_message(key_data)
+        await session.ws.send_message({"type": "request_queued"})
 
-        # Request queued messages
-        await ws.send_message({"type": "request_queued"})
-
-        # Start background listener
         page.run_task(listen_for_messages)
-
-        # Show chat
         show_chat()
 
     async def do_register(e):
-        nonlocal ws, current_user
-        
         if not username_field.value or not password_field.value:
             login_message.value = "Enter username and password"
             page.update()
             return
 
-        # Validate password strength
         valid, msg = validate_password(password_field.value)
         if not valid:
             login_message.value = msg
@@ -313,19 +266,17 @@ async def main(page: ft.Page):
         login_message.value = "Connecting..."
         page.update()
 
-        # Connect to server (use your actual server URL)
-        server = "ws://127.0.0.1:8000" # "ws://10.0.0.6:8000"
-        ws = WS_Client(server)
-        await ws.client_connect(username_field.value)
+        server = "ws://127.0.0.1:8000"
+        session.ws = WS_Client(server)
+        await session.ws.client_connect(username_field.value)
 
-        # Register
         data = {
             "type": "register",
             "username": username_field.value,
             "password": password_field.value
         }
-        await ws.send_message(data)
-        response = await ws.receive_message()
+        await session.ws.send_message(data)
+        response = await session.ws.receive_message()
         result = json.loads(response)
 
         if result.get("success") == False:
@@ -333,24 +284,19 @@ async def main(page: ft.Page):
             page.update()
             return
 
-        current_user = username_field.value
+        session.username = username_field.value
+        session.is_authenticated = True
 
-        # Register keys
         key_data = {
             "type": "register_keys",
-            "user": current_user,
-            "public_kem": base64.b64encode(public_key).decode(),
-            "public_dsa": base64.b64encode(public_sig).decode()
+            "user": session.username,
+            "public_kem": base64.b64encode(session.public_key).decode(),
+            "public_dsa": base64.b64encode(session.public_sig).decode()
         }
-        await ws.send_message(key_data)
+        await session.ws.send_message(key_data)
+        await session.ws.send_message({"type": "request_queued"})
 
-        # Request queued messages
-        await ws.send_message({"type": "request_queued"})
-
-        # Start background listener
         page.run_task(listen_for_messages)
-
-        # Show chat
         show_chat()
 
     login_view = ft.Column(
@@ -383,13 +329,11 @@ async def main(page: ft.Page):
     message_input = ft.TextField(hint_text="Type a message...", expand=True)
 
     async def send_message_click(e):
-        if message_input.value and current_recipient:
+        if message_input.value and session.current_recipient:
             time_str = datetime.now().strftime("%H:%M")
-            
-            # Use bubble instead of plain text
             msg_control = create_sent_bubble(message_input.value, time_str)
             
-            add_message_to_conversation(current_recipient, msg_control)
+            session.add_message(session.current_recipient, msg_control)
             chat_messages.controls.append(msg_control)
             
             await send_encrypted_message(message_input.value)
@@ -398,77 +342,52 @@ async def main(page: ft.Page):
             page.update()
 
     def select_contact(username):
-        nonlocal current_recipient
-        current_recipient = username
+        session.current_recipient = username
         chat_header.value = f"Chat with {username}"
         
-        # Clear unread count
-        clear_unread(username)
+        session.clear_unread(username)
         update_contact_display(username)
         
-        # Load messages
         chat_messages.controls.clear()
-        if username in conversations:
-            chat_messages.controls.extend(conversations[username])
-    
+        chat_messages.controls.extend(session.get_conversation(username))
         page.update()
-
-    # Better approach: dynamically add contacts
-    # when you receive a message from them
 
     def ensure_contact_exists(username):
         """Add contact if they don't exist in the list."""
-        if username == current_user:
-            return  # Don't add ourselves
+        if username == session.username:
+            return
         
-        if username not in contact_buttons:
-            add_contact(username)
+        if session.add_contact(username):  # ← Uses session method
+            add_contact_to_ui(username)
+            page.update()
+        elif username not in session.contact_buttons:
+            # Contact was already in saved list but not in UI
+            add_contact_to_ui(username)
             page.update()
 
-    def add_contact(username):
-            """Add a contact to the list."""
-            def on_contact_click(e):
-                select_contact(username)
-            
-            button = ft.TextButton(
-                username,
-                on_click=on_contact_click,
-            )
-            contact_buttons[username] = button
-            contact_list.controls.append(button)
+    def add_contact_to_ui(username):
+        """Add a contact button to the UI."""
+        def on_contact_click(e):
+            select_contact(username)
+        
+        button = ft.TextButton(username, on_click=on_contact_click)
+        session.contact_buttons[username] = button
+        contact_list.controls.append(button)
 
     def update_contact_display(username):
         """Update contact button to show unread count."""
-        if username in contact_buttons:
-            count = unread_counts.get(username, 0)
+        if username in session.contact_buttons:
+            count = session.get_unread(username)
             if count > 0:
-                contact_buttons[username].text = f"{username} ({count})"
-                contact_buttons[username].style = ft.ButtonStyle(
+                session.contact_buttons[username].text = f"{username} ({count})"
+                session.contact_buttons[username].style = ft.ButtonStyle(
                     color=ft.Colors.WHITE,
                     bgcolor=ft.Colors.BLUE_700,
                 )
             else:
-                contact_buttons[username].text = username
-                contact_buttons[username].style = None
+                session.contact_buttons[username].text = username
+                session.contact_buttons[username].style = None
             page.update()
-
-    def get_conversation(username):
-        if username not in conversations:
-            conversations[username] = []
-        return conversations[username]
-
-    def add_message_to_conversation(username, message_control):
-        if username not in conversations:
-            conversations[username] = []
-        conversations[username].append(message_control)
-
-    def increment_unread(username):
-        if username not in unread_counts:
-            unread_counts[username] = 0
-        unread_counts[username] += 1
-
-    def clear_unread(username):
-        unread_counts[username] = 0
 
     def create_sent_bubble(text, time_str):
         bubble = ft.Container(
@@ -496,7 +415,6 @@ async def main(page: ft.Page):
         )
         return ft.Row([bubble], alignment=ft.MainAxisAlignment.START)
 
-    # New UI element for adding users
     add_contact_input = ft.TextField(
         hint_text="Add user...",
         width=100,
@@ -507,18 +425,14 @@ async def main(page: ft.Page):
     async def on_add_contact_click(e):
         target = add_contact_input.value.strip()
         if target:
-            if target == current_user:
+            if target == session.username:
                 add_contact_input.hint_text = "It's you!"
                 add_contact_input.value = ""
                 page.update()
                 return
             
-            # Send search request to server
-            data = {
-                "type": "search_user", 
-                "username": target
-            }
-            await ws.send_message(data)
+            data = {"type": "search_user", "username": target}
+            await session.ws.send_message(data)
             add_contact_input.value = ""
             add_contact_input.hint_text = "Searching..."
             page.update()
@@ -575,20 +489,16 @@ async def main(page: ft.Page):
         page.update()
 
     def show_chat():
-        chat_header.value = f"Logged in as {current_user}"
+        chat_header.value = f"Logged in as {session.username}"
         
-        # Add test contacts (but NOT yourself)
-        # For now, hardcode some test users
-        test_contacts = ["alice", "bob", "charlie"]
-        for contact in test_contacts:
-            if contact != current_user:  # ← Don't add yourself
-                add_contact(contact)
+        # Load saved contacts
+        for contact in session.contacts:
+            add_contact_to_ui(contact)
         
         page.controls.clear()
         page.add(chat_view)
         page.update()
 
-    # Start with login
     show_login()
 
 ft.app(target=main)

@@ -1,3 +1,4 @@
+# server/main.py
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from server.connection_manager import ConnManager
 import json, asyncio
@@ -53,8 +54,6 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
             elif data["type"] == "request_queued":
                 await cm.deliver_queued(username, websocket)
 
-            
-    
     except WebSocketDisconnect:
         await cm.disconnect(username)
         print(f"{username} disconnected!")
