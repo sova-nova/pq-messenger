@@ -157,4 +157,20 @@ class ConnManager:
             print(f"Delivered {len(queued)} queued messages to {user}")
             self.db.delete_queued_messages(user)
 
+    async def search_user(self, sender_ws, data):
+        exists = self.db.user_exists(data["username"])
+        if(exists):
+            response = {
+                "type": "search_result",
+                "found": True,
+                "username": data["username"]
+            }
+        else:
+            response = {
+                "type": "search_result",
+                "found": False,
+                "username": "Invalid username"
+            }
+        await sender_ws.send_text(json.dumps(response))
+
     

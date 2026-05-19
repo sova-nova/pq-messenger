@@ -126,3 +126,11 @@ class Database:
         )
         conn.commit()
         conn.close()
+
+    def user_exists(self, username):
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1 FROM accounts WHERE username=?", (username,))
+        result = cursor.fetchone()
+        conn.close()
+        return result is not None

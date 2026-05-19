@@ -97,6 +97,21 @@ async def main(page: ft.Page):
                         
                         page.update()
 
+                elif data.get("type") == "search_result":
+                    username = data["username"]
+                    print(f"Search result: {username}")
+                    if data["found"] == True:
+                        add_contact_input.hint_text = "Found!"
+                        ensure_contact_exists(username)
+                        # Automatically request their keys so we can chat
+                        await ws.send_message({
+                            "type": "request_keys",
+                            "user": username
+                        })
+                    else:
+                        add_contact_input.hint_text = f"Not found"
+                    page.update()
+
                 elif data.get("type") == "request_keys":
                     user = data["user"]
                     kem_public = base64.b64decode(data["public_kem"])
@@ -241,7 +256,7 @@ async def main(page: ft.Page):
         page.update()
 
         # Connect to server
-        server = "ws://10.0.0.6:8000"  # or localhost
+        server = "ws://127.0.0.1:8000" # "ws://10.0.0.6:8000"  # or localhost
         ws = WS_Client(server)
         await ws.client_connect(username_field.value)
 
@@ -299,7 +314,7 @@ async def main(page: ft.Page):
         page.update()
 
         # Connect to server (use your actual server URL)
-        server = "ws://10.0.0.6:8000"
+        server = "ws://127.0.0.1:8000" # "ws://10.0.0.6:8000"
         ws = WS_Client(server)
         await ws.client_connect(username_field.value)
 
@@ -408,6 +423,7 @@ async def main(page: ft.Page):
         
         if username not in contact_buttons:
             add_contact(username)
+            print("Got here")
             page.update()
 
     def add_contact(username):
@@ -463,7 +479,7 @@ async def main(page: ft.Page):
                 ft.Text(time_str, size=9, color=ft.Colors.GREY_400, text_align=ft.TextAlign.RIGHT),
             ]),
             bgcolor=ft.Colors.BLUE_700,
-            border_radius=ft.border_radius.all(10),
+            border_radius=ft.BorderRadius.all(10),
             padding=10,
         )
         return ft.Row([bubble], alignment=ft.MainAxisAlignment.END)
@@ -476,12 +492,38 @@ async def main(page: ft.Page):
                 ft.Text(time_str, size=9, color=ft.Colors.GREY_400),
             ]),
             bgcolor=ft.Colors.BLUE_GREY_800,
-            border_radius=ft.border_radius.all(10),
+            border_radius=ft.BorderRadius.all(10),
             padding=10,
         )
         return ft.Row([bubble], alignment=ft.MainAxisAlignment.START)
 
-    
+    # New UI element for adding users
+    add_contact_input = ft.TextField(
+        hint_text="Add user...",
+        width=100,
+        text_size=12,
+        content_padding=5
+    )
+
+    async def on_add_contact_click(e):
+        target = add_contact_input.value.strip()
+        print(f"DEBUG: Add button clicked for: {target}") # See if button works
+        if target:
+            if target == current_user:
+                add_contact_input.hint_text = "It's you!"
+                add_contact_input.value = ""
+                page.update()
+                return
+            
+            # Send search request to server
+            data = {
+                "type": "search_user", 
+                "username": target
+            }
+            await ws.send_message(data)
+            add_contact_input.value = ""
+            add_contact_input.hint_text = "Searching..."
+            page.update()
 
     chat_header = ft.Text("Select a contact", weight=ft.FontWeight.BOLD)
 
@@ -490,6 +532,14 @@ async def main(page: ft.Page):
             ft.Container(
                 content=ft.Column([
                     ft.Text("Contacts", weight=ft.FontWeight.BOLD),
+                    ft.Row([
+                        add_contact_input,
+                        ft.IconButton(
+                            icon=ft.Icons.ADD,
+                            on_click=on_add_contact_click,
+                            icon_size=20
+                        )
+                    ], spacing=0),
                     contact_list,
                 ]),
                 width=150,

@@ -38,6 +38,16 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
             if(data["type"] == "message"):
                 await cm.send_message(websocket, data)
 
+            elif(data["type"] == "search_user"):
+                print("server time")
+                await cm.search_user(websocket, data)
+                # exists = cm.db.user_exists(data["username"])
+                # await websocket.send_text(json.dumps({
+                #     "type": "search_result",
+                #     "found": exists,
+                #     "username": data["username"]
+                # }))
+
             elif(data["type"] == "register_keys" or data["type"] == "request_keys"):
                 await cm.handle_keys(websocket, data)
 
