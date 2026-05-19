@@ -39,7 +39,6 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
                 await cm.send_message(websocket, data)
 
             elif(data["type"] == "search_user"):
-                print("server time")
                 await cm.search_user(websocket, data)
                 # exists = cm.db.user_exists(data["username"])
                 # await websocket.send_text(json.dumps({

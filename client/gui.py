@@ -423,7 +423,6 @@ async def main(page: ft.Page):
         
         if username not in contact_buttons:
             add_contact(username)
-            print("Got here")
             page.update()
 
     def add_contact(username):
@@ -507,7 +506,6 @@ async def main(page: ft.Page):
 
     async def on_add_contact_click(e):
         target = add_contact_input.value.strip()
-        print(f"DEBUG: Add button clicked for: {target}") # See if button works
         if target:
             if target == current_user:
                 add_contact_input.hint_text = "It's you!"
