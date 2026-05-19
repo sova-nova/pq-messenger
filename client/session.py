@@ -1,12 +1,11 @@
 # client/session.py
 
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import Dict, List, Optional
 import flet as ft
 from pathlib import Path
 import json
-from message_history import MessageHistory
+from datetime import datetime
 
 @dataclass
 class Session:
@@ -31,8 +30,10 @@ class Session:
     unread_counts: Dict[str, int] = field(default_factory=dict)
     recipient_keys: Dict[str, dict] = field(default_factory=dict)
     pending_messages: List[dict] = field(default_factory=list)
-    message_history: Optional[MessageHistory] = None
     
+    # Privacy settings
+    persistent_contacts: set = field(default_factory=set)  # Contacts with persistent history enabled
+    message_history: Optional[object] = None
     
     # UI State
     current_recipient: Optional[str] = None
@@ -41,7 +42,6 @@ class Session:
     def __post_init__(self):
         self.contacts_dir = Path.home() / ".pq-messenger" / "user_data"
         self.contacts_dir.mkdir(parents=True, exist_ok=True)
-        # Don't load contacts yet - we don't know the username
     
     def _get_contacts_path(self) -> Path:
         """Get the contacts file path for the current user."""
@@ -49,11 +49,11 @@ class Session:
             raise ValueError("Username not set")
         return self.contacts_dir / f"{self.username}_contacts.json"
     
-    def load_message_history(self, contact: str) -> List[dict]:
-        """Load message history for a contact."""
-        if not self.message_history:
-            return []
-        return self.message_history.load_conversation(contact)
+    def _get_settings_path(self) -> Path:
+        """Get the settings file path for the current user."""
+        if not self.username:
+            raise ValueError("Username not set")
+        return self.contacts_dir / f"{self.username}_settings.json"
     
     def load_contacts(self):
         """Load saved contacts from disk for the current user."""
@@ -62,8 +62,10 @@ class Session:
             return
         
         # Initialize message history
+        from message_history import MessageHistory
         self.message_history = MessageHistory(self.username)
         
+        # Load contacts
         contacts_path = self._get_contacts_path()
         if contacts_path.exists():
             try:
@@ -77,6 +79,9 @@ class Session:
         else:
             print(f"No saved contacts found for {self.username}")
             self.contacts = []
+        
+        # Load settings (including persistent_contacts)
+        self.load_settings()
     
     def save_contacts(self):
         """Save contacts to disk for the current user."""
@@ -91,22 +96,61 @@ class Session:
             print(f"Saved {len(self.contacts)} contacts for {self.username}")
         except Exception as e:
             print(f"Error saving contacts: {e}")
-
-    def save_text_message(self, contact: str, text: str, is_sent: bool, timestamp: str = None):
-        """Save a text message to history."""
-        if not self.message_history:
+    
+    def load_settings(self):
+        """Load user settings including persistent chat preferences."""
+        settings_path = self._get_settings_path()
+        if settings_path.exists():
+            try:
+                with open(settings_path, 'r') as f:
+                    data = json.load(f)
+                    self.persistent_contacts = set(data.get('persistent_contacts', []))
+                    print(f"Loaded settings: {len(self.persistent_contacts)} persistent chats")
+            except Exception as e:
+                print(f"Error loading settings: {e}")
+                self.persistent_contacts = set()
+        else:
+            self.persistent_contacts = set()
+    
+    def save_settings(self):
+        """Save user settings including persistent chat preferences."""
+        if not self.username:
             return
         
-        message_data = {
-            "type": "text",
-            "text": text,
-            "sender": self.username if is_sent else contact,
-            "recipient": contact if is_sent else self.username,
-            "timestamp": timestamp or datetime.now().isoformat(),
-            "is_sent": is_sent
-        }
-        
-        self.message_history.save_message(contact, message_data)
+        try:
+            settings_path = self._get_settings_path()
+            data = {
+                'persistent_contacts': list(self.persistent_contacts)
+            }
+            with open(settings_path, 'w') as f:
+                json.dump(data, f, indent=2)
+            print(f"Saved settings: {len(self.persistent_contacts)} persistent chats")
+        except Exception as e:
+            print(f"Error saving settings: {e}")
+    
+    def is_persistent(self, contact: str) -> bool:
+        """Check if chat history is persistent for this contact."""
+        return contact in self.persistent_contacts
+    
+    def enable_persistence(self, contact: str):
+        """Enable persistent history for a contact."""
+        if contact not in self.persistent_contacts:
+            self.persistent_contacts.add(contact)
+            self.save_settings()
+            print(f"Enabled persistent history for {contact}")
+    
+    def disable_persistence(self, contact: str):
+        """Disable persistent history for a contact and optionally delete history."""
+        if contact in self.persistent_contacts:
+            self.persistent_contacts.remove(contact)
+            self.save_settings()
+            print(f"Disabled persistent history for {contact}")
+    
+    def delete_history(self, contact: str):
+        """Delete persistent history for a contact."""
+        if self.message_history:
+            self.message_history.delete_conversation(contact)
+            print(f"Deleted history for {contact}")
     
     def add_contact(self, username: str) -> bool:
         """Add a contact if not already present."""
@@ -146,6 +190,37 @@ class Session:
         """Get unread count for a contact."""
         return self.unread_counts.get(username, 0)
     
+    def save_text_message(self, contact: str, text: str, is_sent: bool, timestamp: str = None):
+        """Save a text message to history (only if persistence is enabled)."""
+        if not self.message_history:
+            return
+        
+        # Only save if persistence is enabled for this contact
+        if not self.is_persistent(contact):
+            return
+        
+        message_data = {
+            "type": "text",
+            "text": text,
+            "sender": self.username if is_sent else contact,
+            "recipient": contact if is_sent else self.username,
+            "timestamp": timestamp or datetime.now().isoformat(),
+            "is_sent": is_sent
+        }
+        
+        self.message_history.save_message(contact, message_data)
+    
+    def load_message_history(self, contact: str) -> List[dict]:
+        """Load message history for a contact (only if persistence is enabled)."""
+        if not self.message_history:
+            return []
+        
+        # Only load if persistence is enabled for this contact
+        if not self.is_persistent(contact):
+            return []
+        
+        return self.message_history.load_conversation(contact)
+    
     def clear_session(self):
         """Clear all session data (for logout)."""
         self.contacts = []
@@ -155,4 +230,5 @@ class Session:
         self.pending_messages = []
         self.current_recipient = None
         self.contact_buttons = {}
+        self.persistent_contacts = set()
         self.is_authenticated = False

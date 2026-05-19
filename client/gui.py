@@ -338,6 +338,91 @@ async def main(page: ft.Page):
     chat_messages = ft.ListView(expand=True, spacing=10, auto_scroll=True)
     message_input = ft.TextField(hint_text="Type a message...", expand=True)
 
+    # Add persistence toggle
+    persistence_switch = ft.Switch(
+        label="Save History",
+        value=False,
+        on_change=lambda e: toggle_persistence(e)
+    )
+
+    persistence_info = ft.Text(
+        "Temporary chat - messages will be deleted on logout",
+        size=10,
+        color=ft.Colors.GREY_400,
+        italic=True
+    )
+
+    def toggle_persistence(e):
+        """Toggle persistent history for current conversation."""
+        if not session.current_recipient:
+            return
+        
+        if e.control.value:
+            # Enable persistence
+            session.enable_persistence(session.current_recipient)
+            persistence_info.value = "Persistent chat - messages are saved"
+            persistence_info.color = ft.Colors.GREEN_400
+            
+            # Save current conversation to history
+            save_current_conversation_to_history()
+            page.update()
+        else:
+            # Show confirmation dialog before disabling
+            show_disable_persistence_dialog()
+
+    def save_current_conversation_to_history():
+        """Save all current in-memory messages to persistent storage."""
+        if not session.current_recipient:
+            return
+        
+        print(f"Persistence enabled for {session.current_recipient}")
+
+    def show_disable_persistence_dialog():
+        """Show dialog asking whether to delete history when disabling."""
+        
+        def handle_keep_history(e):
+            dlg.open = False
+            if session.current_recipient:
+                session.disable_persistence(session.current_recipient)
+                persistence_switch.value = False
+                persistence_info.value = "Temporary chat - messages will be deleted on logout"
+                persistence_info.color = ft.Colors.GREY_400
+            page.update()
+        
+        def handle_delete_history(e):
+            dlg.open = False
+            if session.current_recipient:
+                session.disable_persistence(session.current_recipient)
+                session.delete_history(session.current_recipient)
+                persistence_switch.value = False
+                persistence_info.value = "Temporary chat - messages will be deleted on logout"
+                persistence_info.color = ft.Colors.GREY_400
+            page.update()
+        
+        def handle_cancel(e):
+            dlg.open = False
+            persistence_switch.value = True  # Keep it enabled
+            page.update()
+        
+        dlg = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Disable Persistent History"),
+            content=ft.Text(
+                "Do you want to delete the saved message history for this contact?\n\n"
+                "• Keep History: Messages stay saved but won't save new ones\n"
+                "• Delete History: All saved messages will be permanently deleted"
+            ),
+            actions=[
+                ft.TextButton("Keep History", on_click=handle_keep_history),
+                ft.TextButton("Delete History", on_click=handle_delete_history),
+                ft.TextButton("Cancel", on_click=handle_cancel),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+            on_dismiss=lambda e: print("Dialog dismissed"),
+        )
+        
+        page.show_dialog(dlg)
+
     async def send_message_click(e):
         if message_input.value and session.current_recipient:
             time_str = datetime.now().strftime("%H:%M")
@@ -347,7 +432,7 @@ async def main(page: ft.Page):
             session.add_message(session.current_recipient, msg_control)
             chat_messages.controls.append(msg_control)
             
-            # Save to history
+            # Save to history (only if persistence enabled)
             session.save_text_message(
                 session.current_recipient, 
                 message_input.value, 
@@ -362,7 +447,21 @@ async def main(page: ft.Page):
 
     def select_contact(username):
         session.current_recipient = username
-        chat_header.value = f"Chat with {username}"
+        chat_header_row.controls[0].value = f"Chat with {username}"
+        
+        # Show persistence controls
+        chat_controls.visible = True
+        
+        # Update persistence toggle based on this contact's settings
+        is_persistent = session.is_persistent(username)
+        persistence_switch.value = is_persistent
+        
+        if is_persistent:
+            persistence_info.value = "Persistent chat - messages are saved"
+            persistence_info.color = ft.Colors.GREEN_400
+        else:
+            persistence_info.value = "Temporary chat - messages will be deleted on logout"
+            persistence_info.color = ft.Colors.GREY_400
         
         session.clear_unread(username)
         update_contact_display(username)
@@ -373,7 +472,7 @@ async def main(page: ft.Page):
         if username in session.conversations:
             chat_messages.controls.extend(session.conversations[username])
         else:
-            # Load from persistent history
+            # Load from persistent history (only if enabled)
             history = session.load_message_history(username)
             session.conversations[username] = []
             
@@ -395,11 +494,10 @@ async def main(page: ft.Page):
         if username == session.username:
             return
         
-        if session.add_contact(username):  # ← Uses session method
+        if session.add_contact(username):
             add_contact_to_ui(username)
             page.update()
         elif username not in session.contact_buttons:
-            # Contact was already in saved list but not in UI
             add_contact_to_ui(username)
             page.update()
 
@@ -435,7 +533,7 @@ async def main(page: ft.Page):
                 ft.Text(time_str, size=9, color=ft.Colors.GREY_400, text_align=ft.TextAlign.RIGHT),
             ]),
             bgcolor=ft.Colors.BLUE_700,
-            border_radius=ft.BorderRadius.all(10),
+            border_radius=ft.border_radius.all(10),
             padding=10,
         )
         return ft.Row([bubble], alignment=ft.MainAxisAlignment.END)
@@ -448,7 +546,7 @@ async def main(page: ft.Page):
                 ft.Text(time_str, size=9, color=ft.Colors.GREY_400),
             ]),
             bgcolor=ft.Colors.BLUE_GREY_800,
-            border_radius=ft.BorderRadius.all(10),
+            border_radius=ft.border_radius.all(10),
             padding=10,
         )
         return ft.Row([bubble], alignment=ft.MainAxisAlignment.START)
@@ -475,8 +573,19 @@ async def main(page: ft.Page):
             add_contact_input.hint_text = "Searching..."
             page.update()
 
-    chat_header = ft.Text("Select a contact", weight=ft.FontWeight.BOLD)
+    # Update chat_header to include persistence controls
+    chat_header_row = ft.Row([
+        ft.Text("Select a contact", weight=ft.FontWeight.BOLD, expand=True),
+    ])
 
+    chat_controls = ft.Column([
+        ft.Row([
+            persistence_switch,
+            persistence_info,
+        ], alignment=ft.MainAxisAlignment.START),
+    ], visible=False)  # Hidden until a contact is selected
+
+    # Update chat_view to include the new controls
     chat_view = ft.Row(
         [
             ft.Container(
@@ -498,7 +607,9 @@ async def main(page: ft.Page):
             ),
             ft.Column(
                 [
-                    chat_header,
+                    chat_header_row,
+                    chat_controls,  # Add persistence controls here
+                    ft.Divider(height=1),
                     chat_messages,
                     ft.Row([
                         message_input,
@@ -527,7 +638,7 @@ async def main(page: ft.Page):
         page.update()
 
     def show_chat():
-        chat_header.value = f"Logged in as {session.username}"
+        chat_header_row.data = f"Logged in as {session.username}"
         
         # Load saved contacts
         for contact in session.contacts:
